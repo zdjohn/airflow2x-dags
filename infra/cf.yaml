@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Managed Workflows for Apache Airflow (MWAA) environment
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+  RequirementsVersion:
+    Type: String
+
+
+Resources:
+  AirflowEnvironment:
+    Type: AWS::MWAA::Environment
+    Properties:
+      # AirflowConfigurationOptions: Json
+      AirflowVersion: "2.0.2"
+      DagS3Path: "dags"
+      EnvironmentClass: "mw1.small"
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      LoggingConfiguration:
+          DagProcessingLogs:
+            Enabled: true
+            LogLevel: INFO
+          SchedulerLogs:
+            Enabled: true
+            LogLevel: INFO
+          TaskLogs:
+            Enabled: true
+            LogLevel: INFO
+          WebserverLogs:
+            Enabled: true
+            LogLevel: INFO
+          WorkerLogs:
+            Enabled: true
+            LogLevel: INFO
+      MaxWorkers: 10
+      MinWorkers: 1
+      Name: !Sub '${Environment}-${AWS::Region}-airflow-environment'
+      NetworkConfiguration:
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        SubnetIds: # This has a max of two subnets
+          - Fn::ImportValue: !Sub ${Environment}-vpc-AppSubnetA-Id
+          - Fn::ImportValue: !Sub ${Environment}-vpc-AppSubnetB-Id
+      RequirementsS3ObjectVersion: !Ref RequirementsVersion
+      RequirementsS3Path: "requirements.txt"
+      SourceBucketArn: !GetAtt Bucket.Arn
+      WebserverAccessMode: PRIVATE_ONLY
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: "The execution role for MWAA"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "airflow.amazonaws.com"
+                - "airflow-env.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: Airflow
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: "Allow"
+                Action: "airflow:PublishMetrics"
+                Resource: !Sub 'arn:aws:airflow:${AWS::Region}:${AWS::AccountId}:environment/${Environment}-${AWS::Region}-airflow-environment'
+
+              - Effect: Deny
+                Action:
+                  - "s3:ListAllMyBuckets"
+                Resource:
+                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket'
+                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket/*'
+
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject*"
+                  - "s3:GetBucket*"
+                  - "s3:List*"
+                Resource:
+                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket'
+                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket/*'
+
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:CreateLogGroup"
+                  - "logs:PutLogEvents"
+                  - "logs:GetLogEvents"
+                  - "logs:GetLogRecord"
+                  - "logs:GetLogGroupFields"
+                  - "logs:getQueryResults"
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:airflow-*"
+
+              - Effect: Allow
+                Action: "logs:DescribeLogGroups"
+                Resource: "*"
+
+              - Effect: Allow
+                Action: "cloudwatch:PutMetricData"
+                Resource: "*"
+
+              - Effect: Allow
+                Action:
+                  - sqs:ChangeMessageVisibility
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:ReceiveMessage
+                  - sqs:SendMessage
+                Resource: !Sub "arn:aws:sqs:${AWS::Region}:*:airflow-celery-*"
+
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey*
+                  - kms:Encrypt
+                NotResource: "arn:aws:kms:*:481874613177:key/*"
+                Condition:
+                  StringLike:
+                    "kms:ViaService":
+                      - "sqs.us-west-2.amazonaws.com"
+      RoleName: !Sub '${Environment}-${AWS::Region}-mwaa-ExecutionRole'
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue VPC
+      GroupDescription: !Ref AWS::StackName
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          Description: 'All traffic'
+          IpProtocol: '-1'
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: 'All traffic'
+          IpProtocol: '-1'
+
+Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAc:!ls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
