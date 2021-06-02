@@ -1,16 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Managed Workflows for Apache Airflow (MWAA) environment
 
-Parameters:
-  Environment:
-    Type: String
-    AllowedValues:
-      - dev
-      - stage
-      - prod
-  RequirementsVersion:
-    Type: String
-
+# Parameters:
+#   RequirementsVersion:
+#     Type: String
 
 Resources:
   AirflowEnvironment:
@@ -39,15 +32,15 @@ Resources:
             LogLevel: INFO
       MaxWorkers: 10
       MinWorkers: 1
-      Name: !Sub '${Environment}-${AWS::Region}-airflow-environment'
+      Name: 'a2-airflow-environment'
       NetworkConfiguration:
         SecurityGroupIds:
           - !Ref SecurityGroup
         SubnetIds: # This has a max of two subnets
-          - Fn::ImportValue: !Sub ${Environment}-vpc-AppSubnetA-Id
-          - Fn::ImportValue: !Sub ${Environment}-vpc-AppSubnetB-Id
+          - Fn::ImportValue: PrivateSubnet1
+          - Fn::ImportValue: PrivateSubnet2
       RequirementsS3ObjectVersion: !Ref RequirementsVersion
-      RequirementsS3Path: "requirements.txt"
+      # RequirementsS3Path: "requirements.txt"
       SourceBucketArn: !GetAtt Bucket.Arn
       WebserverAccessMode: PRIVATE_ONLY
 
@@ -65,20 +58,29 @@ Resources:
             Action:
               - "sts:AssumeRole"
       Policies:
+        - PolicyName: EMR
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - elasticmapreduce:*
+                Effect: Allow
+                Resource:
+                  - '*'
         - PolicyName: Airflow
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: "Allow"
                 Action: "airflow:PublishMetrics"
-                Resource: !Sub 'arn:aws:airflow:${AWS::Region}:${AWS::AccountId}:environment/${Environment}-${AWS::Region}-airflow-environment'
+                Resource: 
+                  - "*"
 
               - Effect: Deny
                 Action:
                   - "s3:ListAllMyBuckets"
                 Resource:
-                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket'
-                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket/*'
+                  - "*"
 
               - Effect: Allow
                 Action:
@@ -86,8 +88,7 @@ Resources:
                   - "s3:GetBucket*"
                   - "s3:List*"
                 Resource:
-                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket'
-                  - !Sub 'arn:aws:s3:::rokt-${Environment}-${AWS::Region}-airflow-bucket/*'
+                  - "*"
 
               - Effect: Allow
                 Action:
@@ -98,8 +99,8 @@ Resources:
                   - "logs:GetLogRecord"
                   - "logs:GetLogGroupFields"
                   - "logs:getQueryResults"
-                Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:airflow-*"
+                Resource: 
+                  - "*"
 
               - Effect: Allow
                 Action: "logs:DescribeLogGroups"
@@ -130,7 +131,7 @@ Resources:
                   StringLike:
                     "kms:ViaService":
                       - "sqs.us-west-2.amazonaws.com"
-      RoleName: !Sub '${Environment}-${AWS::Region}-mwaa-ExecutionRole'
+      RoleName: !Sub '${AWS::Region}-mwaa-ExecutionRole'
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -146,15 +147,15 @@ Resources:
           Description: 'All traffic'
           IpProtocol: '-1'
 
-Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      AccessControl: Private
-      BucketName
-      PublicAccessBlockConfiguration:
-        BlockPublicAc:!ls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
+  Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        AccessControl: Private
+        BucketName: "a2-flow"
+        PublicAccessBlockConfiguration:
+          BlockPublicAc:!ls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        VersioningConfiguration:
+          Status: Enabled
